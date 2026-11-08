@@ -1,0 +1,61 @@
+name: Build Island Fight Race web template
+on: workflow_dispatch
+env:
+  OPTIMIZE: size_extra
+  PHYSICS: godot   # godot = smaller (GodotPhysics3D) | jolt = your current physics engine
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.20
+      - run: pip install scons
+      - name: Get Godot 4.7.2-stable source
+        run: git clone --depth 1 --branch 4.7.2-stable https://github.com/godotengine/godot.git godot-src
+      - name: Check the class list against the real Godot class tree
+        run: python3 costum_engine/check_profile.py godot-src costum_engine/ifr_web.build costum_engine/required_classes.txt godot-src/ifr_web.build
+      - name: Build
+        working-directory: godot-src
+        run: |
+          if [ "$PHYSICS" = "jolt" ]; then PHYS="module_jolt_physics_enabled=yes"; else PHYS="module_godot_physics_3d_enabled=yes"; fi
+          scons -j"$(nproc)" platform=web target=template_release threads=no dlink_enabled=no production=yes optimize=$OPTIMIZE \
+            lto=full minizip=no builtin_certs=no deprecated=no javascript_eval=yes \
+            build_profile=ifr_web.build \
+            vulkan=no d3d12=no metal=no opengl3=yes \
+            modules_enabled_by_default=no \
+            module_gdscript_enabled=yes module_freetype_enabled=yes module_text_server_fb_enabled=yes \
+            $PHYS module_ogg_enabled=yes module_vorbis_enabled=yes \
+            module_websocket_enabled=yes \
+            module_webp_enabled=yes \
+            module_bcdec_enabled=yes
+          ls -l bin
+      - name: Extra size pass (wasm-opt) - kept only if valid and smaller
+        continue-on-error: true
+        working-directory: godot-src/bin
+        run: |
+          set +e
+          Z=godot.web.template_release.wasm32.nothreads.zip
+          rm -rf x && mkdir x && unzip -q "$Z" -d x
+          WO=$(find "$EMSDK" -name wasm-opt -type f 2>/dev/null | head -1)
+          echo "wasm-opt: $WO"; "$WO" --version
+          cp x/godot.wasm /tmp/before.wasm
+          "$WO" -Oz --converge --all-features --strip-debug --strip-producers x/godot.wasm -o /tmp/after.wasm
+          if [ $? -ne 0 ]; then echo "wasm-opt failed - keeping original"; exit 0; fi
+          node -e "const b=require('fs').readFileSync('/tmp/after.wasm');console.log('valid:',WebAssembly.validate(b))" | tee /tmp/v.txt
+          ls -l /tmp/before.wasm /tmp/after.wasm
+          if grep -q "valid: true" /tmp/v.txt && [ "$(stat -c%s /tmp/after.wasm)" -lt "$(stat -c%s /tmp/before.wasm)" ]; then
+            cp /tmp/after.wasm x/godot.wasm
+            rm -f "$Z"
+            (cd x && zip -9 -X -q ../"$Z" *)
+            echo "wasm-opt result used"
+          else
+            echo "original kept"
+          fi
+          rm -rf x
+          ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-template
+          path: godot-src/bin/*.zip
