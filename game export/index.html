@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <title>Island Fight Race</title>
+        <style>
+            html, body, #canvas {
+                margin: 0;
+                padding: 0;
+                border: 0;
+            }
+
+            html, body {
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                overscroll-behavior: none;
+            }
+
+            body {
+                color: white;
+                background-color: black;
+                position: fixed;
+                inset: 0;
+                touch-action: none;
+                -webkit-touch-callout: none;
+                -webkit-user-select: none;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }
+
+            #canvas {
+                display: block;
+            }
+
+            #canvas:focus {
+                outline: none;
+            }
+
+            #status, #status-splash, #status-progress {
+                position: absolute;
+                left: 0;
+                right: 0;
+            }
+
+            #status, #status-splash {
+                top: 0;
+                bottom: 0;
+            }
+
+            #status {
+                background-color: #242424;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                visibility: hidden;
+            }
+
+            #status-splash {
+                max-height: 100%;
+                max-width: 100%;
+                margin: auto;
+            }
+
+            #status-progress, #status-notice {
+                display: none;
+            }
+
+            #status-progress {
+                bottom: 10%;
+                width: 50%;
+                margin: 0 auto;
+            }
+
+            #status-notice {
+                background-color: #5b3943;
+                border-radius: 0.5rem;
+                border: 1px solid #9b3943;
+                color: #e0e0e0;
+                font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+                line-height: 1.3;
+                margin: 0 2rem;
+                overflow: hidden;
+                padding: 1rem;
+                text-align: center;
+                z-index: 1;
+            }
+
+            /* Start-up overlay: covers the black gap between "download finished" and "menu drawn" (2-5 s on a phone).
+               It ignores touches, so the first tap still reaches the page (fullscreen / sound unlock). */
+            #ifr-loading {
+                display: none;
+                position: fixed;
+                inset: 0;
+                z-index: 40;
+                background: #10141c;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                pointer-events: none;
+                color: #e8edf5;
+                font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+            }
+            #ifr-loading .spin {
+                width: 46px; height: 46px; border-radius: 50%;
+                border: 5px solid rgba(255, 255, 255, 0.18); border-top-color: #f2a516;
+                animation: ifr-spin 0.9s linear infinite;
+            }
+            #ifr-loading .txt { margin-top: 16px; font-size: 18px; letter-spacing: 0.04em; }
+            @keyframes ifr-spin { to { transform: rotate(360deg); } }
+
+            /* Google sign-in prompt. It is a real DOM button on purpose: browsers only allow the Google popup
+               when it is opened straight from a real click, which a button drawn inside the canvas cannot give. */
+            #ifr-google {
+                display: none;
+                position: absolute;
+                inset: 0;
+                z-index: 50;
+                background: rgba(0, 0, 0, 0.72);
+                align-items: center;
+                justify-content: center;
+                font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
+                -webkit-user-select: none;
+                user-select: none;
+            }
+
+            #ifr-google .box {
+                background: #1d2430;
+                border: 1px solid #3a475c;
+                border-radius: 14px;
+                padding: 22px 26px;
+                max-width: min(420px, 86vw);
+                text-align: center;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            }
+
+            #ifr-google p {
+                margin: 0 0 16px 0;
+                font-size: 15px;
+                line-height: 1.4;
+                color: #e6ebf2;
+            }
+
+            #ifr-google button {
+                font: inherit;
+                font-weight: 700;
+                font-size: 15px;
+                border: 0;
+                border-radius: 10px;
+                padding: 12px 20px;
+                margin: 4px;
+                cursor: pointer;
+                touch-action: manipulation;
+            }
+
+            #ifr-google .go {
+                background: #ffffff;
+                color: #1f1f1f;
+            }
+
+            #ifr-google .no {
+                background: #38455a;
+                color: #e6ebf2;
+            }
+        
+            #rotate-hint { display: none; position: fixed; inset: 0; z-index: 2147483000; background: rgba(10,12,18,0.94);
+                color: #fff; font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif; text-align: center;
+                flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+            #rotate-hint .phone { width: 64px; height: 108px; border: 5px solid #fff; border-radius: 12px; margin-bottom: 26px;
+                animation: ifr-turn 2.2s ease-in-out infinite; }
+            #rotate-hint .t { font-size: 22px; font-weight: 700; letter-spacing: 1px; padding: 0 24px; }
+            @keyframes ifr-turn { 0%, 25% { transform: rotate(0deg); } 65%, 100% { transform: rotate(-90deg); } }
+            @media (orientation: portrait) and (pointer: coarse) { #rotate-hint { display: flex; } }
+        </style>
+        <script>(function(){var all=[];window.__ifrAudio={all:all};var AC=window.AudioContext||window.webkitAudioContext;if(!AC){return;}function W(){var c=arguments.length?new AC(arguments[0]):new AC();all.push(c);return c;}W.prototype=AC.prototype;window.AudioContext=W;if(window.webkitAudioContext){window.webkitAudioContext=W;}function r(){all.forEach(function(c){if(c.state!=='running'){try{c.resume();}catch(e){}}});}['pointerdown','touchstart','touchend','mousedown','keydown','click'].forEach(function(e){window.addEventListener(e,r,true);});})();</script>
+        <script>
+            /* ---- 1. render-resolution budget -------------------------------------------------------------
+               The browser draws the game at (screen size x devicePixelRatio). On a laptop with 125-200 % scaling or a
+               phone with ratio 3 that is 2-6x more pixels than the editor window, and the graphics card cannot keep up
+               (stutter, and the music stutters with it). The game asks for a number of megapixels (quality level) and
+               the canvas is drawn at no more than that; the page stretches it to the full screen. */
+            (function () {
+                var desc = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+                var fixed = window.devicePixelRatio || 1;
+                var real = function () { return (desc && desc.get) ? desc.get.call(window) : fixed; };
+                var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+                    (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+                var budget = mobile ? 1.0 : 1.6;   /* megapixels, replaced by the game as soon as it knows the quality level */
+                window.__ifrSetBudget = function (mp) {
+                    var n = Number(mp);
+                    if (!(n > 0.2)) { return; }
+                    if (Math.abs(n - budget) < 0.01) { return; }
+                    budget = n;
+                    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+                };
+                try {
+                    Object.defineProperty(window, 'devicePixelRatio', {
+                        configurable: true,
+                        get: function () {
+                            var r = real();
+                            var w = Math.max(window.innerWidth, 1), h = Math.max(window.innerHeight, 1);
+                            var cap = Math.sqrt(budget * 1000000 / (w * h));
+                            return Math.max(0.5, Math.min(r, cap));
+                        }
+                    });
+                } catch (e) {}
+            })();
+
+            /* ---- 2. one tap = one action ------------------------------------------------------------------
+               After a touch the browser may send a second, synthetic mouse click for the same tap. The game already
+               receives the touch, so mouse events that follow a touch within 0.8 s are dropped. */
+            (function () {
+                var last = 0;
+                var mark = function () { last = Date.now(); };
+                ['touchstart', 'touchend', 'touchcancel'].forEach(function (n) {
+                    window.addEventListener(n, mark, { capture: true, passive: true });
+                });
+                ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function (n) {
+                    window.addEventListener(n, function (ev) {
+                        if (ev.isTrusted && Date.now() - last < 800) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+                    }, true);
+                });
+            })();
+
+            /* ---- 3. which addresses may this page connect to? --------------------------------------------
+               Game portals publish a Content-Security-Policy. The game asks here BEFORE it connects anywhere, so a
+               blocked address is simply skipped (no red console errors, no retries). Unknown = allowed. */
+            (function () {
+                window.__ifrCspReady = false;
+                var lists = null;
+                function parse(text) {
+                    var out = {};
+                    String(text || '').split(',').forEach(function (policy) {
+                        policy.split(';').forEach(function (part) {
+                            var t = part.trim().split(/\s+/);
+                            if (!t[0]) { return; }
+                            var name = t[0].toLowerCase();
+                            if (name === 'connect-src' || name === 'default-src') {
+                                out[name] = (out[name] || []).concat(t.slice(1));
+                            }
+                        });
+                    });
+                    return out;
+                }
+                function done(text) {
+                    try { lists = parse(text); } catch (e) { lists = null; }
+                    window.__ifrCspReady = true;
+                }
+                try {
+                    var meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+                    var fromMeta = meta ? meta.getAttribute('content') : '';
+                    fetch(location.href, { method: 'HEAD', cache: 'force-cache' }).then(function (r) {
+                        done((r.headers.get('content-security-policy') || '') + ',' + fromMeta);
+                    }).catch(function () { done(fromMeta); });
+                } catch (e) { done(''); }
+                setTimeout(function () { if (!window.__ifrCspReady) { done(''); } }, 1500);
+
+                function matches(token, u) {
+                    token = token.replace(/^'|'$/g, '');
+                    if (token === '*') { return u.protocol === 'https:' || u.protocol === 'wss:'; }
+                    if (/^[a-z][a-z0-9+.-]*:$/i.test(token)) {
+                        var sch = token.toLowerCase();
+                        if (sch === 'https:') { return u.protocol === 'https:' || u.protocol === 'wss:'; }
+                        return sch === u.protocol;
+                    }
+                    var m = token.match(/^(?:([a-z][a-z0-9+.-]*):\/\/)?([^\/:]+|\*)(?::(\*|\d+))?(\/.*)?$/i);
+                    if (!m) { return false; }
+                    if (m[1]) {
+                        var ts = m[1].toLowerCase() + ':';
+                        var ok = ts === u.protocol || (ts === 'https:' && u.protocol === 'wss:') || (ts === 'http:' && u.protocol === 'ws:') ||
+                            (ts === 'wss:' && u.protocol === 'wss:');
+                        if (!ok) { return false; }
+                    }
+                    var host = m[2].toLowerCase(), h = u.hostname.toLowerCase();
+                    if (host.indexOf('*.') === 0) { if (!(h.length > host.length - 1 && h.slice(-(host.length - 1)) === host.slice(1))) { return false; } }
+                    else if (host !== '*' && host !== h) { return false; }
+                    return true;
+                }
+                /* 1 = allowed or unknown, 0 = the page's policy blocks it */
+                /* Playgama confirmed: external calls are blocked ONLY in its Sandbox (the sandbox address carries
+                   platform_id=playgama_sandbox / csp=sandbox). On the real release - and on any other host - the game
+                   always tries to connect, whatever this page's policy looks like, so a wrong guess can never switch
+                   Firebase or the multiplayer server off in production. */
+                var inSandbox = /[?&](platform_id=playgama_sandbox|csp=sandbox)(&|$)/.test(location.search);
+                window.__ifrCanConnect = function (url) {
+                    try {
+                        if (!inSandbox) { return 1; }
+                        if (!lists) { return 1; }
+                        var list = lists['connect-src'] || lists['default-src'];
+                        if (!list) { return 1; }
+                        var u = new URL(url);
+                        for (var i = 0; i < list.length; i++) {
+                            if (list[i] === "'none'") { return 0; }
+                            if (matches(list[i], u)) { return 1; }
+                        }
+                        return 0;
+                    } catch (e) { return 1; }
+                };
+            })();
+
+            /* ---- 4. loading state used by the game (platform.gd sets __ifrReady) ---- */
+            window.__ifrReady = false;
+            window.__ifrProgress = 0;
+            </script>
+    </head>
+    <body>
+        <div id="rotate-hint"><div class="phone"></div><div class="t">TURN YOUR PHONE SIDEWAYS TO PLAY</div></div>
+        <canvas id="canvas">
+            Your browser does not support the canvas tag.
+        </canvas>
+
+        <div id="ifr-loading"><div class="spin"></div><div class="txt" id="ifr-loading-text">Loading 99%</div></div>
+
+        <noscript>
+            Your browser does not support JavaScript.
+        </noscript>
+
+        <div id="status">
+            <img id="status-splash" src="index.png" alt="">
+            <progress id="status-progress"></progress>
+            <div id="status-notice"></div>
+        </div>
+
+        <script>
+            /* Google sign-in (Firebase). Used outside Playgama; on Playgama the Bridge sign-in is used instead.
+               Answer is left in window.__ifrGoogleResult for the game: {ok:true, token} or {ok:false, err}. */
+            window.__ifrGoogleStart = function (clientId) {
+                window.__ifrGoogleResult = null;
+                function fail(e) { window.__ifrGoogleResult = { ok: false, err: e }; }
+                function run() {
+                    try {
+                        var client = google.accounts.oauth2.initTokenClient({
+                            client_id: clientId,
+                            scope: 'openid email profile',
+                            callback: function (r) {
+                                if (r && r.access_token) { window.__ifrGoogleResult = { ok: true, token: r.access_token }; }
+                                else { fail(r && r.error ? r.error : 'failed'); }
+                            },
+                            error_callback: function (e) { fail(e && e.type === 'popup_failed_to_open' ? 'auth/popup-blocked' : 'cancelled'); }
+                        });
+                        client.requestAccessToken();
+                    } catch (e) { fail('failed'); }
+                }
+                if (window.google && window.google.accounts && window.google.accounts.oauth2) { run(); return; }
+                var s = document.createElement('script');
+                s.src = 'https://accounts.google.com/gsi/client';
+                s.async = true;
+                s.onload = run;
+                s.onerror = function () { fail('script-blocked'); };
+                document.head.appendChild(s);
+            };
+        </script>
+        <script>
+            /* Hardware probe for the automatic graphics choice (read by game_settings.gd). It measures real capability:
+               processor speed (a short timed loop), core count, memory, the graphics driver's limits and the screen. */
+            window.__ifrHardware = function () {
+                var r = { cores: navigator.hardwareConcurrency || 0, memory: navigator.deviceMemory || 0,
+                          touch: navigator.maxTouchPoints || 0, dpr: window.devicePixelRatio || 1,
+                          sw: screen.width || 0, sh: screen.height || 0, gpu: '', maxTex: 0, software: false, bench: 0 };
+                try {
+                    /* the game's OWN canvas: getContext returns the context the engine already created, so no extra
+                       graphics context (and no extra memory) is made just to read the driver's limits */
+                    var c = document.getElementById('canvas');
+                    var gl = c ? (c.getContext('webgl2') || c.getContext('webgl')) : null;
+                    if (gl) {
+                        r.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
+                        var ext = gl.getExtension('WEBGL_debug_renderer_info');
+                        r.gpu = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)).toLowerCase();
+                        r.software = /swiftshader|llvmpipe|software|softpipe/.test(r.gpu);
+                    }
+                } catch (e) {}
+                try {
+                    var t0 = performance.now(), x = 0.5;
+                    for (var i = 0; i < 400000; i++) { x = x * 1.0000001 + Math.sqrt(i & 1023); }
+                    r.bench = performance.now() - t0 + (x < 0 ? 1 : 0);
+                } catch (e) {}
+                return r;
+            };
+        </script>
+        <div id="ifr-google">
+            <div class="box">
+                <p id="ifr-google-text">Sign in with Google to save your progress and play on any device.</p>
+                <button class="go" id="ifr-google-go" type="button">Continue with Google</button>
+                <button class="no" id="ifr-google-no" type="button">Cancel</button>
+            </div>
+        </div>
+
+        <script>
+            /* ---- web hardening: no context menu / long-press menu / text selection / page scroll / pinch zoom ---- */
+            (function () {
+                var stop = function (e) { e.preventDefault(); return false; };
+                ['contextmenu', 'selectstart', 'dragstart', 'gesturestart', 'gesturechange', 'gestureend'].forEach(function (n) {
+                    document.addEventListener(n, stop, { passive: false });
+                });
+                document.addEventListener('touchmove', function (e) {
+                    if (e.touches && e.touches.length > 1) { e.preventDefault(); }
+                }, { passive: false });
+                document.addEventListener('wheel', function (e) {
+                    if (e.ctrlKey) { e.preventDefault(); }
+                }, { passive: false });
+                window.addEventListener('scroll', function () { window.scrollTo(0, 0); });
+
+                /* mobile only: the first touch asks for fullscreen + landscape (every step is allowed to fail) */
+                var done = false;
+                var mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+                    (navigator.maxTouchPoints > 1 && /Macintosh/i.test(navigator.userAgent));
+                /* FULLSCREEN + ADS (Playgama and other portals)
+                   On a phone the portal page leaves the game only a small strip (header + browser bars), so the game has to go
+                   fullscreen to be playable. In a portal the game lives in an iframe and the portal draws its ads in ITS page,
+                   outside the iframe: while the iframe is fullscreen the ad plays invisibly and the game waits = frozen screen.
+                   So: fullscreen on the first tap (as before), but just before every ad the game leaves fullscreen so the ad
+                   is visible (platform.gd calls __ifrBeforeAd), and the next tap after the ad goes fullscreen again. */
+                var inPortal = false;
+                try { inPortal = window.self !== window.top; } catch (e) { inPortal = true; }
+                window.__ifrInPortal = inPortal;
+                var fsHint = null;
+                function showFsHint(on) {
+                    try {
+                        if (!fsHint) {
+                            fsHint = document.createElement('div');
+                            fsHint.style.cssText = 'position:fixed;left:50%;bottom:14%;transform:translateX(-50%);z-index:45;' +
+                                'padding:10px 18px;border-radius:12px;background:rgba(0,0,0,.72);color:#fff;pointer-events:none;' +
+                                'font:600 16px Arial,sans-serif;display:none;';
+                            fsHint.textContent = 'Tap the screen to go fullscreen';
+                            document.body.appendChild(fsHint);
+                        }
+                        fsHint.style.display = on ? 'block' : 'none';
+                    } catch (e) {}
+                }
+                window.__ifrBeforeAd = function () {
+                    try {
+                        if (document.fullscreenElement || document.webkitFullscreenElement) {
+                            var ex = document.exitFullscreen || document.webkitExitFullscreen;
+                            if (ex) { var q = ex.call(document); if (q && q.catch) { q.catch(function () {}); } return true; }
+                        }
+                    } catch (e) {}
+                    return false;
+                };
+                window.__ifrAfterAd = function () {
+                    if (!mobile) { return; }
+                    done = false;
+                    if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
+                        showFsHint(true);
+                        setTimeout(function () { showFsHint(false); }, 5000);
+                    }
+                };
+                function goFullscreen() {
+                    if (done || !mobile) { return; }
+                    showFsHint(false);
+                    done = true;
+                    try {
+                        var el = document.documentElement;
+                        var req = el.requestFullscreen || el.webkitRequestFullscreen;
+                        if (req && !document.fullscreenElement) {
+                            var p = req.call(el);
+                            if (p && p.then) {
+                                p.then(function () {
+                                    try {
+                                        if (screen.orientation && screen.orientation.lock) {
+                                            screen.orientation.lock('landscape').catch(function () {});
+                                        }
+                                    } catch (e) {}
+                                }).catch(function () {});
+                            }
+                        }
+                    } catch (e) {}
+                }
+                window.addEventListener('touchend', goFullscreen, { passive: true });
+                window.addEventListener('click', goFullscreen, { passive: true });
+
+                /* sound must stop while the tab is hidden (Playgama requirement); Godot's own focus handling covers the rest */
+                document.addEventListener('visibilitychange', function () {
+                    try {
+                        var list = (window.__ifrAudio && window.__ifrAudio.all) || [];
+                        list.forEach(function (c) {
+                            if (document.hidden) { if (c.state === 'running') { c.suspend(); } }
+                            else if (c.state === 'suspended') { c.resume(); }
+                        });
+                    } catch (e) {}
+                });
+            })();
+        </script>
+
+        <script src="index.js"></script>
+        <script>
+            const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":36898764,"index.wasm":18229176},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4}
+            const ENGINE = new Engine(GODOT_CONFIG)
+            const CANVAS = document.getElementById('canvas')
+
+            let bridgeScript = null
+            let bridgeTimeout = null
+            let bridgeLoaded = false
+
+            function addLocalBridge() {
+                if (bridgeLoaded) return
+                bridgeLoaded = true
+                clearTimeout(bridgeTimeout)
+
+                if (bridgeScript && bridgeScript.parentNode) {
+                    bridgeScript.onload = null
+                    bridgeScript.onerror = null
+                    bridgeScript.parentNode.removeChild(bridgeScript)
+                }
+
+                window.bridge = null
+                window.playgamaBridge = null
+
+                const scriptElement = document.createElement('script')
+                scriptElement.src = './playgama-bridge.js'
+                scriptElement.onload = function() {
+                    initializeBridge()
+                }
+                scriptElement.onerror = function() {
+                    startEngine()   // no bridge at all: still start the game
+                }
+                document.body.appendChild(scriptElement)
+            }
+
+            bridgeScript = document.createElement('script')
+            bridgeScript.src = 'https://bridge.playgama.com/v2/stable/playgama-bridge.js'
+            bridgeScript.onload = initializeBridge
+            bridgeScript.onerror = addLocalBridge
+
+            bridgeTimeout = setTimeout(() => {
+                console.warn('CDN bridge failed to load within 2 seconds, loading local bridge')
+                addLocalBridge()
+            }, 2000)
+
+            document.head.appendChild(bridgeScript)
+
+            let loadingDone = false
+            let loadingTimer = null
+            function showLoadingOverlay() {
+                if (loadingDone) return
+                const o = document.getElementById('ifr-loading')
+                if (o) o.style.display = 'flex'
+                if (loadingTimer) return
+                loadingTimer = setInterval(function () { if (window.__ifrReady) finishLoading() }, 100)
+                setTimeout(finishLoading, 60000)   /* safety: never keep the overlay forever */
+            }
+            function finishLoading() {
+                if (loadingDone) return
+                loadingDone = true
+                clearInterval(loadingTimer)
+                /* two frames later, so the menu is already on the canvas when the overlay goes away */
+                requestAnimationFrame(function () { requestAnimationFrame(function () {
+                    const o = document.getElementById('ifr-loading')
+                    if (o) o.style.display = 'none'
+                    try { if (window.bridge) bridge.setGameLoadingProgress(100) } catch (e) {}
+                }) })
+            }
+
+            let gameStarted = false
+            function startEngine() {
+                if (gameStarted) return
+                gameStarted = true
+                ENGINE.startGame({
+                    onProgress: function (current, total) {
+                        if (total) { window.__ifrProgress = (current / total) * 100 }
+                        /* never report 100 % until the menu is really drawn (finishLoading below): the platform loader
+                           would close while the engine is still starting and a black screen would show */
+                        try { if (window.bridge && total) bridge.setGameLoadingProgress(Math.min(99, (current / total) * 100)) } catch (e) {}
+                        if (total && current >= total) { showLoadingOverlay() }
+                    },
+                }).then(() => {
+                    CANVAS.focus()
+                    showLoadingOverlay()   /* also covers servers that never report a download size */
+                }).catch(function (err) {
+                    const box = document.getElementById('status-notice')
+                    if (box) {
+                        box.textContent = 'The game could not start. Please reload the page.'
+                        box.style.display = 'block'
+                        document.getElementById('status').style.visibility = 'visible'
+                    }
+                })
+            }
+
+            let bridgeInitDone = false
+            function initializeBridge() {
+                /* runs once: a slow connection may fire both the web copy and the local copy of the bridge */
+                if (bridgeInitDone) return
+                bridgeInitDone = true
+                clearTimeout(bridgeTimeout)
+                /* if the platform never answers, the game must still start (a phone must not wait forever) */
+                const safety = setTimeout(startEngine, 8000)
+                try {
+                    bridge.engine = 'godot-4'
+                    bridge.initialize().then(() => {
+                        clearTimeout(safety)
+                        try { bridge.setGameLoadingProgress(0) } catch (e) {}
+                        startEngine()
+                    }).catch(function () {
+                        clearTimeout(safety)
+                        startEngine()
+                    })
+                } catch (e) {
+                    clearTimeout(safety)
+                    startEngine()
+                }
+            }
+        </script>
+
+    </body>
+</html>
+
